@@ -179,7 +179,7 @@ function session(){const h=new Date().getUTCHours()+new Date().getUTCMinutes()/6
   const ov=(h>=12.5&&h<16)?' · LDN/NY overlap 🔥':'';return (s.length?s.join(' + '):'Sydney/Off-hours')+ov;}
 function tickClock(){$('#clkIST').textContent=tz('Asia/Kolkata');$('#clkLDN').textContent=tz('Europe/London');
   $('#clkNY').textContent=tz('America/New_York');$('#sess').textContent=session();
-  const stale=Date.now()-lastOk>20000;$('#liveDot').classList.toggle('stale',stale);
+  const stale=Date.now()-lastOk>(STATIC?120000:20000);$('#liveDot').classList.toggle('stale',stale);
   if(DATA){renderNext();}}
 setInterval(tickClock,1000);tickClock();
 
@@ -309,7 +309,13 @@ function renderHealth(){const H=DATA.feed_health||{};$('#health').innerHTML=Obje
 /* ---------- polling ---------- */
 function renderAll(){renderTicker();renderAsset('XAU');renderAsset('BTC');detectNew();renderNews();renderCal();renderNext();renderDerivs();renderHealth();
   $('#updated').textContent='Updated '+new Date().toLocaleTimeString();firstLoad=false;}
-async function poll(){try{const r=await fetch('/api/version',{cache:'no-store'});const j=await r.json();lastOk=Date.now();
+const STATIC=location.protocol==='file:'||location.hostname.endsWith('github.io');
+async function pollStatic(){try{const d=await fetch('data.json?t='+Date.now(),{cache:'no-store'});const j=await d.json();lastOk=Date.now();
+    if(!DATA||j.updated!==DATA.updated){DATA=j;renderAll();}
+    $('#updated').textContent='Data built '+ago(new Date(j.updated).getTime()/1000);}
+  catch(e){$('#updated').textContent='data.json not available yet';}
+  setTimeout(pollStatic,60000);}
+async function poll(){if(STATIC)return pollStatic();try{const r=await fetch('/api/version',{cache:'no-store'});const j=await r.json();lastOk=Date.now();
     if(j.v!==ver){ver=j.v;const d=await fetch('/api/all',{cache:'no-store'});DATA=await d.json();renderAll();}}
   catch(e){$('#updated').textContent='Backend offline – is server.py running?';}
   setTimeout(poll,2000);}
