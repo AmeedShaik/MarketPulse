@@ -1,0 +1,46 @@
+name: MarketPulse Live Data
+
+# One long job that rebuilds data.json every ~60 s for ~5h40m and
+# force-pushes it to a single-commit "data" branch.
+# A new run is queued every 30 min, so when one ends the next starts.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-data
+  cancel-in-progress: false   # queue the next run, don't kill the running one
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build every 60 s and publish to 'data' branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name  "marketpulse-bot"
+          git config --global user.email "actions@users.noreply.github.com"
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          END=$((SECONDS + 20400))
+          while [ $SECONDS -lt $END ]; do
+            START=$SECONDS
+            python server.py --once || echo "build failed"
+            if [ -f site/data.json ]; then
+              rm -rf pub && mkdir pub && cp site/data.json pub/
+              ( cd pub && git init -q -b data && git add data.json \
+                && git commit -q -m "data $(date -u +%H:%M:%S)" \
+                && git push -q -f "$REMOTE" data ) || echo "push failed"
+            fi
+            WAIT=$((60 - (SECONDS - START)))
+            if [ $WAIT -gt 5 ]; then sleep $WAIT; fi
+          done
