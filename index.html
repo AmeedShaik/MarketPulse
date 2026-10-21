@@ -310,11 +310,15 @@ function renderHealth(){const H=DATA.feed_health||{};$('#health').innerHTML=Obje
 function renderAll(){renderTicker();renderAsset('XAU');renderAsset('BTC');detectNew();renderNews();renderCal();renderNext();renderDerivs();renderHealth();
   $('#updated').textContent='Updated '+new Date().toLocaleTimeString();firstLoad=false;}
 const STATIC=location.protocol==='file:'||location.hostname.endsWith('github.io');
-async function pollStatic(){try{const d=await fetch('data.json?t='+Date.now(),{cache:'no-store'});const j=await d.json();lastOk=Date.now();
+const LIVE_URL='https://api.github.com/repos/AmeedShaik/MarketPulse/contents/data.json?ref=data';
+async function getData(){
+  try{const r=await fetch(LIVE_URL,{cache:'no-cache',headers:{Accept:'application/vnd.github.raw'}});if(r.ok)return await r.json();}catch(e){}
+  const d=await fetch('data.json?t='+Date.now(),{cache:'no-store'});return await d.json();}
+async function pollStatic(){try{const j=await getData();lastOk=Date.now();
     if(!DATA||j.updated!==DATA.updated){DATA=j;renderAll();}
     $('#updated').textContent='Data built '+ago(new Date(j.updated).getTime()/1000);}
   catch(e){$('#updated').textContent='data.json not available yet';}
-  setTimeout(pollStatic,60000);}
+  setTimeout(pollStatic,75000);}
 async function poll(){if(STATIC)return pollStatic();try{const r=await fetch('/api/version',{cache:'no-store'});const j=await r.json();lastOk=Date.now();
     if(j.v!==ver){ver=j.v;const d=await fetch('/api/all',{cache:'no-store'});DATA=await d.json();renderAll();}}
   catch(e){$('#updated').textContent='Backend offline – is server.py running?';}
