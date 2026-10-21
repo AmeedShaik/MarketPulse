@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MarketPulse · XAUUSD & BTCUSD Live</title>
+<style>
+:root{--bg:#0b0e14;--panel:#131722;--panel2:#1a1f2e;--line:#2a2e39;--txt:#d1d4dc;--mut:#787b86;
+--up:#26a69a;--dn:#ef5350;--gold:#f5c542;--btc:#f7931a;--blue:#2962ff;--warn:#ff9800}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.45 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
+a{color:inherit;text-decoration:none}a:hover{color:#fff;text-decoration:underline}
+header{position:sticky;top:0;z-index:10;background:#000;border-bottom:1px solid var(--line)}
+.top{display:flex;align-items:center;gap:14px;padding:8px 14px;flex-wrap:wrap}
+.logo{font-weight:800;font-size:16px;letter-spacing:.5px}.logo b{color:var(--gold)}
+.clocks{display:flex;gap:12px;color:var(--mut);font-size:12px}
+.clocks span b{color:var(--txt)}
+.sess{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:#1e2a44;color:#82b1ff}
+.spacer{flex:1}
+.btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+.btn.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.live{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--up);box-shadow:0 0 8px var(--up);animation:pulse 1.5s infinite}
+.dot.stale{background:var(--dn);box-shadow:0 0 8px var(--dn)}
+@keyframes pulse{50%{opacity:.35}}
+.ticker{display:flex;gap:0;overflow-x:auto;border-top:1px solid var(--line);scrollbar-width:none}
+.tk{padding:6px 14px;border-right:1px solid var(--line);white-space:nowrap;font-size:12px}
+.tk .n{color:var(--mut);margin-right:6px}.tk .p{font-weight:700}
+.up{color:var(--up)}.dn{color:var(--dn)}.mut{color:var(--mut)}
+main{padding:12px;display:grid;gap:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid-main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:12px}
+@media(max-width:1100px){.grid2,.grid-main{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.card h3{margin:0;padding:10px 14px;font-size:13px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.card .body{padding:12px 14px}
+.asset{display:grid;grid-template-columns:1.1fr 1fr;gap:14px}
+@media(max-width:700px){.asset{grid-template-columns:1fr}}
+.price{font-size:28px;font-weight:800}
+.chg{font-size:14px;font-weight:700;margin-left:8px}
+.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-weight:800;font-size:12px}
+.b-sbull{background:#0d3d36;color:#4cffd5}.b-bull{background:#123b33;color:var(--up)}
+.b-neu{background:#2a2e39;color:#c9c9c9}.b-bear{background:#45191a;color:var(--dn)}.b-sbear{background:#5a1517;color:#ff8a80}
+.gauge{position:relative;height:10px;border-radius:5px;background:linear-gradient(90deg,#ef5350,#555 50%,#26a69a);margin:10px 0 4px}
+.gauge i{position:absolute;top:-4px;width:4px;height:18px;background:#fff;border-radius:2px;transition:left .6s}
+.gl{display:flex;justify-content:space-between;font-size:10px;color:var(--mut)}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.kv div{background:var(--panel2);border-radius:6px;padding:6px 8px}
+.kv small{display:block;color:var(--mut);font-size:10px;text-transform:uppercase}
+.kv b{font-size:13px}
+.drivers{margin-top:10px;font-size:12px}
+.drivers div{padding:4px 0;border-top:1px dashed var(--line);display:flex;gap:6px}
+.drivers .s{min-width:28px;font-weight:800;text-align:right}
+.ladder{font-size:12px;max-height:330px;overflow:auto}
+.ladder .row{display:grid;grid-template-columns:1fr auto 62px;gap:6px;padding:3px 6px;border-radius:4px}
+.ladder .row.R{color:#ff9e9b}.ladder .row.S{color:#7fe0d6}
+.ladder .row.near{background:#2a2e39;font-weight:800}
+.ladder .now{background:var(--blue);color:#fff;font-weight:800;margin:3px 0}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--line);align-items:center}
+.tab{padding:4px 12px;border-radius:14px;cursor:pointer;color:var(--mut);border:1px solid transparent;font-size:12px}
+.tab.on{background:#fff;color:#000;font-weight:700}
+.tab:hover{border-color:var(--line)}
+input.search{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px 9px;min-width:170px}
+.news{max-height:760px;overflow:auto}
+.ni{display:grid;grid-template-columns:70px 1fr auto;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);align-items:start}
+.ni:hover{background:var(--panel2)}
+.ni .age{color:var(--mut);font-size:12px}
+.ni .t{font-size:13.5px}
+.ni .meta{display:flex;gap:5px;margin-top:3px;flex-wrap:wrap}
+.chip{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;background:#2a2e39;color:#b2b5be}
+.c-XAU{background:#3d3210;color:var(--gold)}.c-BTC{background:#3d2608;color:var(--btc)}.c-MACRO{background:#16254a;color:#82b1ff}
+.c-HIGH{background:#5a1517;color:#ff8a80}.c-MED{background:#3d2e0a;color:#ffcc80}.c-FED{background:#1b3a1b;color:#a5d6a7}
+.ni .src{color:var(--mut);font-size:11px;white-space:nowrap;text-align:right}
+.ni.new{animation:flash 2.5s ease-out 3}
+.ni.hi{border-left:3px solid var(--dn)}
+@keyframes flash{0%{background:#2962ff55}100%{background:transparent}}
+.newtag{background:var(--blue);color:#fff}
+.cal{max-height:520px;overflow:auto}
+.ev{display:grid;grid-template-columns:62px 34px 1fr 54px 54px;gap:6px;padding:6px 14px;border-bottom:1px solid var(--line);font-size:12px;align-items:center}
+.ev.today{background:#16202f}.ev.past{opacity:.5}.ev.next{outline:1px solid var(--warn)}
+.ev .imp{width:10px;height:10px;border-radius:2px;display:inline-block}
+.imp.High{background:var(--dn)}.imp.Medium{background:var(--warn)}.imp.Low{background:#fdd835}.imp.Holiday{background:#666}
+.dayh{padding:6px 14px;background:#000;color:var(--mut);font-weight:700;font-size:11px;letter-spacing:.5px}
+.countdown{font-size:22px;font-weight:800;color:var(--warn)}
+.health{font-size:11px;max-height:200px;overflow:auto}
+.health div{display:flex;justify-content:space-between;padding:2px 0}
+.empty{padding:20px;text-align:center;color:var(--mut)}
+.charts{display:none}.charts.on{display:grid}
+.tvbox{height:460px}
+footer{color:var(--mut);font-size:11px;text-align:center;padding:10px}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div class="logo">Market<b>Pulse</b> <span class="mut" style="font-weight:400;font-size:12px">XAUUSD · BTCUSD</span></div>
+    <div class="clocks">
+      <span>IST <b id="clkIST">--</b></span><span>London <b id="clkLDN">--</b></span>
+      <span>New York <b id="clkNY">--</b></span><span class="sess" id="sess">--</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn" id="btnCharts" type="button">📈 Charts</button>
+    <button class="btn" id="btnSound" type="button">🔔 Sound</button>
+    <button class="btn" id="btnNotify" type="button">🖥 Alerts</button>
+    <button class="btn" id="btnRefresh" type="button">⟳ Refresh</button>
+    <div class="live"><span class="dot" id="liveDot"></span><span id="updated">connecting…</span></div>
+  </div>
+  <div class="ticker" id="ticker"></div>
+</header>
+
+<main>
+  <div class="grid2 charts" id="charts">
+    <div class="card"><h3>XAUUSD</h3><div class="tvbox" id="tv_xau"></div></div>
+    <div class="card"><h3>BTCUSD</h3><div class="tvbox" id="tv_btc"></div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card" id="card-XAU"></div>
+    <div class="card" id="card-BTC"></div>
+  </div>
+
+  <div class="grid-main">
+    <div class="card">
+      <h3>⚡ Live News Wire <span class="mut" id="newsCount" style="font-weight:400"></span></h3>
+      <div class="tabs" id="tabs">
+        <span class="tab on" data-f="ALL">All</span><span class="tab" data-f="XAU">🟡 Gold</span>
+        <span class="tab" data-f="BTC">🟠 Bitcoin</span><span class="tab" data-f="MACRO">🌐 Macro</span>
+        <span class="tab" data-f="FED">🏛 Fed</span><span class="tab" data-f="HIGH">🔥 High impact</span>
+        <span class="tab" data-f="BULL">▲ Bullish</span><span class="tab" data-f="BEAR">▼ Bearish</span>
+        <input class="search" id="search" placeholder="Search headlines…">
+      </div>
+      <div class="news" id="news"><div class="empty">Loading headlines…</div></div>
+    </div>
+
+    <div style="display:grid;gap:12px;align-content:start">
+      <div class="card">
+        <h3>⏱ Next High-Impact USD Event</h3>
+        <div class="body" id="nextEv"><span class="mut">Loading…</span></div>
+      </div>
+      <div class="card">
+        <h3>📅 Economic Calendar (USD + global High) <span class="mut" style="font-weight:400;margin-left:auto">your local time</span></h3>
+        <div class="tabs" id="calTabs">
+          <span class="tab on" data-c="TODAY">Today</span><span class="tab" data-c="WEEK">This week</span>
+          <span class="tab" data-c="FED">Fed speakers</span><span class="tab" data-c="HIGH">High only</span>
+        </div>
+        <div class="cal" id="cal"><div class="empty">Loading calendar…</div></div>
+      </div>
+      <div class="card">
+        <h3>🧭 BTC Positioning & Market Mood</h3>
+        <div class="body" id="derivs"></div>
+      </div>
+      <div class="card">
+        <h3>🛰 Source health</h3>
+        <div class="body health" id="health"></div>
+      </div>
+    </div>
+  </div>
+</main>
+<footer>Headline sentiment is a keyword model + technicals + DXY/yields — a decision aid, not trade advice. Gold price uses COMEX futures (GC=F); spot XAUUSD differs by the futures basis.</footer>
+
+<script>
+(function(){
+const $=s=>document.querySelector(s);
+let DATA=null, ver=-1, newsFilter='ALL', calFilter='TODAY', q='';
+let sound=localStorage.getItem('mp_sound')==='1', notify=localStorage.getItem('mp_notify')==='1';
+const knownIds=new Set(); let firstLoad=true, lastOk=Date.now();
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=(v,d=2)=>v==null||isNaN(v)?'—':Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const sign=v=>(v>0?'+':'')+fmt(v);
+const cls=v=>v>0?'up':v<0?'dn':'mut';
+function ago(ts){const s=Math.max(0,Date.now()/1000-ts);if(s<60)return Math.floor(s)+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
+function badge(l){const m={'Strong Bullish':'b-sbull','Bullish':'b-bull','Neutral':'b-neu','Bearish':'b-bear','Strong Bearish':'b-sbear'};return `<span class="badge ${m[l]||'b-neu'}">${esc(l||'—')}</span>`;}
+
+/* ---------- clocks & sessions ---------- */
+function tz(z){return new Date().toLocaleTimeString('en-GB',{timeZone:z,hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function session(){const h=new Date().getUTCHours()+new Date().getUTCMinutes()/60;const s=[];
+  if(h>=0&&h<9)s.push('Tokyo');if(h>=7&&h<16)s.push('London');if(h>=12.5&&h<21)s.push('New York');
+  const ov=(h>=12.5&&h<16)?' · LDN/NY overlap 🔥':'';return (s.length?s.join(' + '):'Sydney/Off-hours')+ov;}
+function tickClock(){$('#clkIST').textContent=tz('Asia/Kolkata');$('#clkLDN').textContent=tz('Europe/London');
+  $('#clkNY').textContent=tz('America/New_York');$('#sess').textContent=session();
+  const stale=Date.now()-lastOk>20000;$('#liveDot').classList.toggle('stale',stale);
+  if(DATA){renderNext();}}
+setInterval(tickClock,1000);tickClock();
+
+/* ---------- buttons ---------- */
+function setBtns(){$('#btnSound').classList.toggle('on',sound);$('#btnNotify').classList.toggle('on',notify);}
+setBtns();
+$('#btnSound').addEventListener('click',()=>{sound=!sound;localStorage.setItem('mp_sound',sound?'1':'0');setBtns();if(sound)beep();});
+$('#btnNotify').addEventListener('click',async()=>{if(!notify&&'Notification'in window){const p=await Notification.requestPermission();notify=p==='granted';}else notify=false;localStorage.setItem('mp_notify',notify?'1':'0');setBtns();});
+$('#btnRefresh').addEventListener('click',()=>fetch('/api/refresh'));
+let chartsLoaded=false;
+$('#btnCharts').addEventListener('click',()=>{const c=$('#charts');c.classList.toggle('on');$('#btnCharts').classList.toggle('on');if(!chartsLoaded){chartsLoaded=true;loadTV();}});
+function loadTV(){const s=document.createElement('script');s.src='https://s3.tradingview.com/tv.js';s.onload=()=>{
+  [['tv_xau','OANDA:XAUUSD'],['tv_btc','BITSTAMP:BTCUSD']].forEach(([id,sym])=>new TradingView.widget({container_id:id,symbol:sym,interval:'15',theme:'dark',style:'1',autosize:true,timezone:'Asia/Kolkata',hide_side_toolbar:true,allow_symbol_change:true}));};document.head.appendChild(s);}
+function beep(){try{const a=new (window.AudioContext||window.webkitAudioContext)();const o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);o.frequency.value=880;g.gain.value=.08;o.start();o.stop(a.currentTime+.18);}catch(e){}}
+
+document.querySelectorAll('#tabs .tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('#tabs .tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');newsFilter=t.dataset.f;renderNews();}));
+document.querySelectorAll('#calTabs .tab').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('#calTabs .tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');calFilter=t.dataset.c;renderCal();}));
+$('#search').addEventListener('input',e=>{q=e.target.value.toLowerCase();renderNews();});
+
+/* ---------- ticker ---------- */
+function renderTicker(){const L=DATA.levels||{},M=DATA.macro||{},D=DATA.derivs||{};const items=[];
+  if(L.XAU)items.push(['🟡 GOLD',fmt(L.XAU.price),L.XAU.chg_pct]);
+  if(L.BTC)items.push(['🟠 BTC',fmt(L.BTC.price,0),L.BTC.chg_pct]);
+  [['DXY','DXY',3],['US10Y','US 10Y %',3],['WTI','WTI Oil',2],['SILVER','Silver',3],['SPX_FUT','S&P Fut',2],['NQ_FUT','Nasdaq Fut',2],['VIX','VIX',2]].forEach(([k,n,d])=>{const m=M[k];if(m&&m.price!=null)items.push([n,fmt(m.price,d),m.chg_pct]);});
+  if(M.GSR)items.push(['Gold/Silver',fmt(M.GSR.price,1),null]);
+  if(D.fng)items.push(['Crypto Fear&Greed',D.fng.value+' '+D.fng.label,null]);
+  if(D.funding!=null)items.push(['BTC Funding',fmt(D.funding,4)+'%',null]);
+  $('#ticker').innerHTML=items.map(([n,p,c])=>`<div class="tk"><span class="n">${esc(n)}</span><span class="p">${esc(p)}</span>${c!=null?` <span class="${cls(c)}">${sign(c)}%</span>`:''}</div>`).join('');}
+
+/* ---------- asset cards ---------- */
+function spark(vals,color){if(!vals||vals.length<2)return'';const w=220,h=40,mn=Math.min(...vals),mx=Math.max(...vals),r=mx-mn||1;
+  const pts=vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(1)},${(h-(v-mn)/r*h).toFixed(1)}`).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="40" preserveAspectRatio="none"><polyline fill="none" stroke="${color}" stroke-width="1.5" points="${pts}"/></svg>`;}
+function renderAsset(code){const el=$('#card-'+code),L=(DATA.levels||{})[code],S=(DATA.sentiment||{})[code];
+  const title=code==='XAU'?'🟡 XAUUSD · Gold':'🟠 BTCUSD · Bitcoin',color=code==='XAU'?'#f5c542':'#f7931a',dp=code==='XAU'?2:0;
+  if(!L){el.innerHTML=`<h3>${title}</h3><div class="empty">Waiting for price feed…</div>`;return;}
+  const s=S||{score:0,label:'Neutral',drivers:[],tech_notes:[],macro_notes:[]};
+  const pos=Math.max(0,Math.min(100,(s.score+100)/2));
+  const lv=L.key_levels||[];let ladder='',placed=false;
+  lv.forEach(k=>{if(!placed&&k.price<L.price){ladder+=`<div class="row now"><span>▶ PRICE</span><span>${fmt(L.price,dp)}</span><span></span></div>`;placed=true;}
+    const near=(L.nearest_res&&k.label===L.nearest_res.label&&k.price===L.nearest_res.price)||(L.nearest_sup&&k.label===L.nearest_sup.label&&k.price===L.nearest_sup.price);
+    ladder+=`<div class="row ${k.side}${near?' near':''}"><span>${k.side==='R'?'R':'S'} · ${esc(k.label)}</span><span>${fmt(k.price,dp)}</span><span style="text-align:right">${sign(k.dist_pct)}%</span></div>`;});
+  if(!placed)ladder+=`<div class="row now"><span>▶ PRICE</span><span>${fmt(L.price,dp)}</span><span></span></div>`;
+  const drv=(s.drivers||[]).slice(0,5).map(d=>`<div><span class="s ${cls(d.score)}">${d.score>0?'▲':'▼'}${Math.abs(d.score).toFixed(1)}</span><a href="${esc(d.link)}" target="_blank" rel="noopener">${esc(d.title)}</a></div>`).join('')||'<div class="mut">No directional headlines yet</div>';
+  const nr=L.nearest_res,ns=L.nearest_sup;
+  el.innerHTML=`<h3>${title} <span class="mut" style="font-weight:400;margin-left:auto">${esc(L.source)}</span></h3>
+  <div class="body asset">
+   <div>
+    <div><span class="price">${fmt(L.price,dp)}</span><span class="chg ${cls(L.chg)}">${sign(L.chg)} (${sign(L.chg_pct)}%)</span></div>
+    ${spark(L.spark,color)}
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px"><b>Today's sentiment</b> ${badge(s.label)} <span class="${cls(s.score)}" style="font-weight:800">${sign(s.score)}</span></div>
+    <div class="gauge"><i style="left:calc(${pos}% - 2px)"></i></div><div class="gl"><span>Bearish −100</span><span>Neutral</span><span>Bullish +100</span></div>
+    <div class="kv">
+     <div><small>News (45%)</small><b class="${cls(s.news_score)}">${sign(s.news_score)}</b><br><span class="mut" style="font-size:11px">▲${s.bull||0} ▼${s.bear||0}</span></div>
+     <div><small>Technical (40%)</small><b class="${cls(s.tech_score)}">${sign(s.tech_score)}</b><br><span class="mut" style="font-size:11px">${esc((s.tech_notes||[]).slice(0,2).join(' · '))}</span></div>
+     <div><small>Macro (15%)</small><b class="${cls(s.macro_score)}">${sign(s.macro_score)}</b><br><span class="mut" style="font-size:11px">${esc((s.macro_notes||[]).join(' · '))}</span></div>
+     <div><small>Nearest Resistance</small><b class="dn">${nr?fmt(nr.price,dp):'—'}</b><br><span class="mut" style="font-size:11px">${nr?esc(nr.label)+' ('+sign(nr.dist_pct)+'%)':''}</span></div>
+     <div><small>Nearest Support</small><b class="up">${ns?fmt(ns.price,dp):'—'}</b><br><span class="mut" style="font-size:11px">${ns?esc(ns.label)+' ('+sign(ns.dist_pct)+'%)':''}</span></div>
+     <div><small>ATR(14) Daily</small><b>${fmt(L.atr,dp)}</b><br><span class="mut" style="font-size:11px">Range used ${fmt(L.range_used_pct,0)}%</span></div>
+     <div><small>Day H / L</small><b>${fmt(L.day_high,dp)}</b><br><span class="mut">${fmt(L.day_low,dp)}</span></div>
+     <div><small>ATR exp. range</small><b>${fmt(L.exp_high,dp)}</b><br><span class="mut">${fmt(L.exp_low,dp)}</span></div>
+     <div><small>RSI 14 (D)</small><b class="${L.rsi>70?'dn':L.rsi<30?'up':''}">${fmt(L.rsi,1)}</b><br><span class="mut" style="font-size:11px">${L.rsi>70?'Overbought':L.rsi<30?'Oversold':'Normal'}</span></div>
+    </div>
+    <div class="drivers"><b>Top sentiment drivers (24h)</b>${drv}</div>
+   </div>
+   <div><b>Support / Resistance ladder</b><div class="mut" style="font-size:11px;margin-bottom:4px">Daily & weekly pivots, prev day/week H-L, EMAs, swing clusters</div><div class="ladder">${ladder}</div></div>
+  </div>`;
+  const lad=el.querySelector('.ladder'),nw=el.querySelector('.ladder .now');if(lad&&nw)lad.scrollTop=Math.max(0,nw.offsetTop-lad.offsetTop-lad.clientHeight/2);}
+
+/* ---------- news ---------- */
+function newsPass(n){
+  if(q&&!(n.title+' '+n.source).toLowerCase().includes(q))return false;
+  const sc=Object.values(n.scores||{});
+  switch(newsFilter){case'ALL':return true;case'XAU':case'BTC':case'MACRO':return n.tags.includes(newsFilter);
+    case'FED':return n.fed;case'HIGH':return n.impact==='HIGH';case'BULL':return sc.some(v=>v>0);case'BEAR':return sc.some(v=>v<0);}return true;}
+function renderNews(){const list=(DATA.news||[]).filter(newsPass);
+  $('#newsCount').textContent=`${list.length} headlines`;
+  if(!list.length){$('#news').innerHTML='<div class="empty">No headlines match.</div>';return;}
+  const now=Date.now()/1000;
+  $('#news').innerHTML=list.slice(0,250).map(n=>{
+    const fresh=now-n.ts<900, isNew=!firstLoad&&n._new;
+    const sc=Object.entries(n.scores||{}).filter(([,v])=>v!==0).map(([a,v])=>`<span class="chip ${v>0?'up':'dn'}">${a} ${v>0?'▲':'▼'}${Math.abs(v).toFixed(1)}</span>`).join('');
+    return `<div class="ni${isNew?' new':''}${n.impact==='HIGH'?' hi':''}">
+      <div class="age" title="${new Date(n.ts*1000).toLocaleString()}">${ago(n.ts)}</div>
+      <div><a class="t" href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}</a>
+       <div class="meta">${fresh?'<span class="chip newtag">NEW</span>':''}${n.tags.map(t=>`<span class="chip c-${t}">${t==='XAU'?'GOLD':t}</span>`).join('')}
+       ${n.impact!=='LOW'?`<span class="chip c-${n.impact}">${n.impact} IMPACT</span>`:''}${n.fed?'<span class="chip c-FED">FED</span>':''}${sc}</div></div>
+      <div class="src">${esc(n.source)}</div></div>`;}).join('');}
+
+function detectNew(){const fresh=[];(DATA.news||[]).forEach(n=>{n._new=!knownIds.has(n.id);if(n._new){knownIds.add(n.id);if(!firstLoad)fresh.push(n);}});
+  const hot=fresh.filter(n=>n.impact==='HIGH'||n.fed);
+  if(hot.length){if(sound)beep();if(notify&&'Notification'in window&&Notification.permission==='granted')hot.slice(0,3).forEach(n=>new Notification('⚡ '+(n.tags.join('/')),{body:n.title}));
+    document.title=`(${hot.length}) ⚡ MarketPulse`;setTimeout(()=>document.title='MarketPulse · XAUUSD & BTCUSD Live',15000);}}
+
+/* ---------- calendar ---------- */
+function sameDay(a,b){return a.toDateString()===b.toDateString();}
+function renderCal(){const ev=DATA.calendar||[],today=new Date(),now=Date.now()/1000;
+  let list=ev.filter(e=>e.ts);
+  if(calFilter==='TODAY')list=list.filter(e=>sameDay(new Date(e.ts*1000),today));
+  if(calFilter==='FED')list=list.filter(e=>e.cat==='FED'||e.speech);
+  if(calFilter==='HIGH')list=list.filter(e=>e.impact==='High');
+  if(!list.length){$('#cal').innerHTML=`<div class="empty">${calFilter==='TODAY'?'No USD / high-impact events today.':'No events.'}</div>`;return;}
+  const nxt=list.find(e=>e.ts>now);let html='',day='';
+  list.forEach(e=>{const d=new Date(e.ts*1000),ds=d.toLocaleDateString(undefined,{weekday:'short',day:'2-digit',month:'short'});
+    if(ds!==day){day=ds;html+=`<div class="dayh">${esc(ds.toUpperCase())}</div>`;}
+    html+=`<div class="ev${sameDay(d,today)?' today':''}${e.ts<now?' past':''}${e===nxt?' next':''}">
+      <span>${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span><span><i class="imp ${esc(e.impact)}"></i> ${esc(e.country)}</span>
+      <span>${e.cat!=='OTHER'?`<span class="chip">${e.cat}</span> `:''}${esc(e.title)}</span>
+      <span class="mut" title="Forecast">F: ${esc(e.forecast||'–')}</span><span class="mut" title="Previous">P: ${esc(e.previous||'–')}</span></div>`;});
+  $('#cal').innerHTML=html;}
+function renderNext(){const now=Date.now()/1000;const e=(DATA.calendar||[]).find(x=>x.ts&&x.ts>now&&x.impact==='High'&&x.country==='USD')||(DATA.calendar||[]).find(x=>x.ts&&x.ts>now&&x.impact==='High');
+  if(!e){$('#nextEv').innerHTML='<span class="mut">No upcoming high-impact event this week.</span>';return;}
+  let s=Math.floor(e.ts-now);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=s%60;
+  $('#nextEv').innerHTML=`<div class="countdown">${h}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s</div>
+   <div><b>${esc(e.country)} · ${esc(e.title)}</b></div><div class="mut">${new Date(e.ts*1000).toLocaleString()} · Forecast ${esc(e.forecast||'–')} · Prev ${esc(e.previous||'–')}</div>
+   ${s<1800?'<div style="color:var(--dn);font-weight:800;margin-top:4px">⚠ Volatility window — consider tightening risk / avoiding new entries</div>':''}`;}
+
+/* ---------- derivs & health ---------- */
+function renderDerivs(){const D=DATA.derivs||{},S=DATA.sentiment||{};let h='<div class="kv" style="margin-top:0">';
+  h+=`<div><small>Fear & Greed</small><b>${D.fng?D.fng.value:'—'}</b><br><span class="mut">${D.fng?esc(D.fng.label)+' (prev '+D.fng.prev+')':''}</span></div>`;
+  h+=`<div><small>BTC Funding (8h)</small><b class="${D.funding>0.03?'dn':D.funding<0?'up':''}">${D.funding!=null?fmt(D.funding,4)+'%':'—'}</b><br><span class="mut">${D.funding>0.03?'Crowded longs':D.funding<0?'Shorts paying':'Neutral'}</span></div>`;
+  h+=`<div><small>BTC Open Interest</small><b>${D.open_interest!=null?fmt(D.open_interest,0):'—'}</b><br><span class="mut">BTC (Binance perp)</span></div></div>`;
+  ['XAU','BTC'].forEach(a=>{const s=S[a];if(s)h+=`<div style="margin-top:8px">${a==='XAU'?'Gold':'Bitcoin'} headlines 24h: <span class="up">▲ ${s.bull}</span> · <span class="dn">▼ ${s.bear}</span> · <span class="mut">● ${s.neutral}</span></div>`;});
+  $('#derivs').innerHTML=h;}
+function renderHealth(){const H=DATA.feed_health||{};$('#health').innerHTML=Object.entries(H).map(([k,v])=>`<div><span>${v.ok?'🟢':'🔴'} ${esc(k)}</span><span class="mut" title="${esc(v.error||'')}">${v.ok?v.count+' · '+v.ms+'ms':'failed'}</span></div>`).join('')||'<span class="mut">Loading…</span>';}
+
+/* ---------- polling ---------- */
+function renderAll(){renderTicker();renderAsset('XAU');renderAsset('BTC');detectNew();renderNews();renderCal();renderNext();renderDerivs();renderHealth();
+  $('#updated').textContent='Updated '+new Date().toLocaleTimeString();firstLoad=false;}
+async function poll(){try{const r=await fetch('/api/version',{cache:'no-store'});const j=await r.json();lastOk=Date.now();
+    if(j.v!==ver){ver=j.v;const d=await fetch('/api/all',{cache:'no-store'});DATA=await d.json();renderAll();}}
+  catch(e){$('#updated').textContent='Backend offline – is server.py running?';}
+  setTimeout(poll,2000);}
+setInterval(()=>{if(DATA){(DATA.news||[]).forEach(n=>n._new=false);renderNews();}},30000);
+poll();
+})();
+</script>
+</body>
+</html>
