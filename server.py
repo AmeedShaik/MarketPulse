@@ -666,7 +666,27 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, b"not found", "text/plain")
 
 
+def build_once(out_dir="site"):
+    """One-shot build for GitHub Actions: writes site/data.json + site/index.html."""
+    import shutil
+    for f in (refresh_prices, refresh_macro, refresh_news, refresh_calendar, refresh_derivs):
+        try:
+            f()
+        except Exception as e:
+            log(f"{f.__name__} failed: {e}")
+    os.makedirs(out_dir, exist_ok=True)
+    with LOCK:
+        body = json.dumps({**STATE, "server_time": time.time()}, default=str)
+    with open(os.path.join(out_dir, "data.json"), "w", encoding="utf-8") as f:
+        f.write(body)
+    shutil.copy(os.path.join(BASE_DIR, "index.html"), os.path.join(out_dir, "index.html"))
+    log(f"static build written to {out_dir}/ ({len(STATE['news'])} headlines)")
+
+
 def main():
+    import sys
+    if "--once" in sys.argv:
+        return build_once()
     log("MarketPulse starting - loading feeds in background...")
     loop(refresh_news, NEWS_REFRESH_SEC, "news")
     loop(refresh_prices, PRICE_REFRESH_SEC, "prices")
