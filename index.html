@@ -179,7 +179,7 @@ function session(){const h=new Date().getUTCHours()+new Date().getUTCMinutes()/6
   const ov=(h>=12.5&&h<16)?' · LDN/NY overlap 🔥':'';return (s.length?s.join(' + '):'Sydney/Off-hours')+ov;}
 function tickClock(){$('#clkIST').textContent=tz('Asia/Kolkata');$('#clkLDN').textContent=tz('Europe/London');
   $('#clkNY').textContent=tz('America/New_York');$('#sess').textContent=session();
-  const stale=Date.now()-lastOk>(STATIC?120000:20000);$('#liveDot').classList.toggle('stale',stale);
+  const stale=Date.now()-lastOk>(location.hostname.endsWith('github.io')?120000:20000);$('#liveDot').classList.toggle('stale',stale);
   if(DATA){renderNext();}}
 setInterval(tickClock,1000);tickClock();
 
