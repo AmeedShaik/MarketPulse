@@ -323,5 +323,181 @@ setInterval(()=>{if(DATA){(DATA.news||[]).forEach(n=>n._new=false);renderNews();
 poll();
 })();
 </script>
+<!-- ===================== ORDER FLOW MODULE (paste just above </body>) ===================== -->
+<style>
+#of-card .ofbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line)}
+#of-card .ofstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;padding:10px 14px}
+#of-card .ofstats div{background:var(--panel2);border-radius:6px;padding:6px 8px}
+#of-card .ofstats small{display:block;color:var(--mut);font-size:10px;text-transform:uppercase}
+#of-card .ofstats b{font-size:14px}
+#of-card .ofgrid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:12px;padding:0 14px 12px}
+@media(max-width:900px){#of-card .ofgrid{grid-template-columns:1fr}}
+#of-card canvas{width:100%;height:230px;background:var(--panel2);border-radius:8px;display:block}
+#of-card .tape{max-height:260px;overflow:auto;font-size:12px;background:var(--panel2);border-radius:8px}
+#of-card .tape div{display:grid;grid-template-columns:62px 1fr auto;gap:6px;padding:3px 8px;border-bottom:1px solid var(--line)}
+#of-card .bookbar{height:14px;border-radius:7px;overflow:hidden;display:flex;margin-top:4px}
+#of-card .bookbar i{display:block;height:100%}
+#of-card .sig{padding:0 14px 12px;font-weight:700}
+#of-card input{width:90px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:3px 6px}
+</style>
+<script>
+(function(){
+  /* ---------- config ---------- */
+  const SYMS={
+    BTC:{bn:'btcusdt',cb:'BTC-USD',label:'BTCUSD',whale:250000,dp:0},
+    XAU:{bn:'paxgusdt',cb:'PAXG-USD',label:'Gold proxy (PAXG)',whale:25000,dp:2}
+  };
+  const BN_WS=['wss://stream.binance.com:9443','wss://data-stream.binance.vision'];
+  const BN_REST=['https://api.binance.com','https://data-api.binance.vision'];
+  const MINUTES=60;
+
+  /* ---------- card ---------- */
+  const card=document.createElement('div');
+  card.className='card';card.id='of-card';
+  card.innerHTML=`<h3>📊 Live Order Flow <span class="mut" id="of-src" style="font-weight:400;margin-left:auto">connecting…</span></h3>
+   <div class="ofbar">
+     <span class="tab on" data-s="BTC">🟠 BTC</span><span class="tab" data-s="XAU">🟡 Gold (PAXG proxy)</span>
+     <span class="mut" style="margin-left:auto;font-size:12px">Whale ≥ $</span><input id="of-whale" type="number" min="1000" step="1000">
+   </div>
+   <div class="ofstats" id="of-stats"></div>
+   <div class="sig" id="of-sig"></div>
+   <div class="ofgrid">
+     <div><div class="mut" style="font-size:11px;margin-bottom:4px">1-min Delta (bars, buy − sell aggressor $) · CVD (line) · last 60 min</div><canvas id="of-cv"></canvas></div>
+     <div><div class="mut" style="font-size:11px;margin-bottom:4px">🐋 Large trades tape</div><div class="tape" id="of-tape"><div class="mut">Waiting for large trades…</div></div></div>
+   </div>`;
+  const anchor=document.querySelector('main .grid-main');
+  anchor?anchor.parentNode.insertBefore(card,anchor):document.querySelector('main').appendChild(card);
+
+  /* ---------- state ---------- */
+  const S={};
+  for(const k in SYMS)S[k]={bars:[],cvd:0,cvdBase:0,last:null,tape:[],bid:0,ask:0,trades:0};
+  let cur='BTC',src='—';
+  const $=s=>card.querySelector(s);
+  const money=v=>{const a=Math.abs(v),s=v<0?'−':'';return a>=1e6?s+'$'+(a/1e6).toFixed(2)+'M':a>=1e3?s+'$'+(a/1e3).toFixed(1)+'K':s+'$'+a.toFixed(0);};
+  const col=v=>v>0?'up':v<0?'dn':'mut';
+  const minute=ts=>Math.floor(ts/60000)*60000;
+
+  function bar(st,t){let b=st.bars[st.bars.length-1];
+    if(!b||b.t<t){b={t,buy:0,sell:0,o:null,c:null};st.bars.push(b);if(st.bars.length>MINUTES)st.bars.shift();}
+    return b;}
+  function addTrade(k,price,usd,isBuy,ts){const st=S[k];if(!st)return;
+    const b=bar(st,minute(ts));if(b.o==null)b.o=price;b.c=price;
+    if(isBuy){b.buy+=usd;st.cvd+=usd;}else{b.sell+=usd;st.cvd-=usd;}
+    st.last=price;st.trades++;
+    if(usd>=SYMS[k].whale){st.tape.unshift({ts,price,usd,isBuy});if(st.tape.length>40)st.tape.pop();if(k===cur)dirtyTape=true;}
+    dirty=true;}
+
+  /* ---------- history bootstrap from 1m klines (taker buy volume) ---------- */
+  async function bootstrap(k){
+    for(const h of BN_REST){try{
+      const r=await fetch(`${h}/api/v3/klines?symbol=${SYMS[k].bn.toUpperCase()}&interval=1m&limit=${MINUTES}`);
+      if(!r.ok)continue;const rows=await r.json();const st=S[k];
+      const live=new Map(st.bars.map(b=>[b.t,b]));st.bars=[];let cvd=0;
+      rows.forEach(x=>{const t=+x[0],qv=+x[7],tb=+x[10];const b=live.get(t)||{t,buy:tb,sell:qv-tb,o:+x[1],c:+x[4]};
+        st.bars.push(b);cvd+=b.buy-b.sell;});
+      st.cvd=cvd;st.last=st.last||+rows[rows.length-1][4];dirty=true;return;
+    }catch(e){}}
+  }
+
+  /* ---------- Binance websocket ---------- */
+  let ws=null,wsIdx=0,retry=0;
+  function connectBinance(){
+    if(wsIdx>=BN_WS.length){return connectCoinbase();}
+    const streams=Object.values(SYMS).flatMap(s=>[s.bn+'@aggTrade',s.bn+'@depth20@1000ms']).join('/');
+    let opened=false;
+    try{ws=new WebSocket(`${BN_WS[wsIdx]}/stream?streams=${streams}`);}catch(e){wsIdx++;return connectBinance();}
+    const to=setTimeout(()=>{if(!opened){try{ws.close();}catch(e){}}},7000);
+    ws.onopen=()=>{opened=true;clearTimeout(to);retry=0;src='Binance (live)';dirty=true;};
+    ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}
+      const d=m.data,stream=m.stream||'';const k=Object.keys(SYMS).find(x=>stream.startsWith(SYMS[x].bn));if(!k||!d)return;
+      if(d.e==='aggTrade'){const p=+d.p,q=+d.q;addTrade(k,p,p*q,!d.m,d.T);}
+      else if(d.bids){const mid=(+d.bids[0][0]+ +d.asks[0][0])/2,lim=mid*0.002;
+        S[k].bid=d.bids.filter(x=>mid-x[0]<=lim).reduce((a,x)=>a+x[0]*x[1],0);
+        S[k].ask=d.asks.filter(x=>x[0]-mid<=lim).reduce((a,x)=>a+x[0]*x[1],0);dirty=true;}};
+    ws.onclose=()=>{clearTimeout(to);
+      if(!opened){wsIdx++;return connectBinance();}
+      src='reconnecting…';dirty=true;setTimeout(connectBinance,Math.min(30000,1000*2**retry++));};
+    ws.onerror=()=>{};
+  }
+  /* ---------- Coinbase fallback (trades only, no depth) ---------- */
+  function connectCoinbase(){
+    let opened=false;
+    try{ws=new WebSocket('wss://ws-feed.exchange.coinbase.com');}catch(e){src='blocked on this network';dirty=true;return;}
+    ws.onopen=()=>{opened=true;retry=0;src='Coinbase (live, no book)';dirty=true;
+      ws.send(JSON.stringify({type:'subscribe',product_ids:Object.values(SYMS).map(s=>s.cb),channels:['matches']}));};
+    ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}
+      if(m.type!=='match'&&m.type!=='last_match')return;
+      const k=Object.keys(SYMS).find(x=>SYMS[x].cb===m.product_id);if(!k)return;
+      const p=+m.price,q=+m.size;addTrade(k,p,p*q,m.side==='sell',Date.parse(m.time));}; // side = maker side
+    ws.onclose=()=>{if(!opened){src='order-flow feeds blocked on this network';dirty=true;return;}
+      src='reconnecting…';dirty=true;setTimeout(connectCoinbase,Math.min(30000,1000*2**retry++));};
+  }
+
+  /* ---------- render ---------- */
+  let dirty=true,dirtyTape=true;
+  function sumDelta(st,n){return st.bars.slice(-n).reduce((a,b)=>a+b.buy-b.sell,0);}
+  function sumVol(st,n){return st.bars.slice(-n).reduce((a,b)=>a+b.buy+b.sell,0);}
+  function priceChg(st,n){const bs=st.bars.slice(-n).filter(b=>b.o!=null);return bs.length?bs[bs.length-1].c-bs[0].o:0;}
+  function render(){
+    if(!dirty)return;dirty=false;
+    const st=S[cur],cfg=SYMS[cur];
+    $('#of-src').textContent=src;
+    const d1=sumDelta(st,1),d5=sumDelta(st,5),d15=sumDelta(st,15),v5=sumVol(st,5);
+    const buyPct=v5?((v5+d5)/2)/v5*100:50;
+    const tot=st.bid+st.ask,imb=tot?(st.bid-st.ask)/tot*100:0;
+    $('#of-stats').innerHTML=`
+     <div><small>Last</small><b>${st.last?st.last.toLocaleString('en-US',{minimumFractionDigits:cfg.dp,maximumFractionDigits:cfg.dp}):'—'}</b></div>
+     <div><small>Delta 1m</small><b class="${col(d1)}">${money(d1)}</b></div>
+     <div><small>Delta 5m</small><b class="${col(d5)}">${money(d5)}</b></div>
+     <div><small>Delta 15m</small><b class="${col(d15)}">${money(d15)}</b></div>
+     <div><small>CVD 60m</small><b class="${col(st.cvd)}">${money(st.cvd)}</b></div>
+     <div><small>Aggressive buy % (5m)</small><b class="${buyPct>55?'up':buyPct<45?'dn':''}">${buyPct.toFixed(1)}%</b></div>
+     <div><small>Book imbalance ±0.2%</small><b class="${col(imb)}">${tot?(imb>0?'+':'')+imb.toFixed(1)+'%':'—'}</b>
+       ${tot?`<div class="bookbar"><i style="width:${st.bid/tot*100}%;background:var(--up)"></i><i style="flex:1;background:var(--dn)"></i></div>`:''}</div>`;
+    // divergence / absorption hint
+    const pc=priceChg(st,15);let sig='';
+    if(st.bars.length>=15&&sumVol(st,15)>0){
+      const rel=Math.abs(d15)/sumVol(st,15);
+      if(pc>0&&d15<0&&rel>0.05)sig='<span class="dn">⚠ Bearish divergence: price up 15m but sellers aggressive — possible absorption / weak rally</span>';
+      else if(pc<0&&d15>0&&rel>0.05)sig='<span class="up">⚠ Bullish divergence: price down 15m but buyers aggressive — possible absorption at lows</span>';
+      else if(pc>0&&d15>0)sig='<span class="up">✔ Up-move confirmed by buy delta</span>';
+      else if(pc<0&&d15<0)sig='<span class="dn">✔ Down-move confirmed by sell delta</span>';
+    }
+    if(Math.abs(imb)>35&&tot)sig+=` <span class="mut">· Book ${imb>0?'bid':'ask'}-heavy (${imb.toFixed(0)}%) — spoofable, use as context only</span>`;
+    $('#of-sig').innerHTML=sig;
+    drawChart(st);
+    if(dirtyTape){dirtyTape=false;
+      $('#of-tape').innerHTML=st.tape.length?st.tape.map(t=>`<div><span class="mut">${new Date(t.ts).toLocaleTimeString()}</span><span class="${t.isBuy?'up':'dn'}">${t.isBuy?'▲ BUY':'▼ SELL'} @ ${t.price.toLocaleString('en-US',{maximumFractionDigits:cfg.dp})}</span><b class="${t.isBuy?'up':'dn'}">${money(t.usd)}</b></div>`).join(''):'<div class="mut">Waiting for large trades…</div>';}
+  }
+  function drawChart(st){
+    const cv=$('#of-cv'),dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;
+    if(!w||!h)return;cv.width=w*dpr;cv.height=h*dpr;const c=cv.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);
+    const bs=st.bars;if(!bs.length){c.fillStyle='#787b86';c.fillText('Waiting for trades…',10,20);return;}
+    const deltas=bs.map(b=>b.buy-b.sell);let run=0;const cvd=deltas.map(d=>run+=d);
+    const mx=Math.max(1,...deltas.map(Math.abs)),cmx=Math.max(...cvd),cmn=Math.min(...cvd),cr=(cmx-cmn)||1;
+    const pad=4,bw=(w-pad*2)/MINUTES,mid=h/2;
+    c.strokeStyle='#2a2e39';c.beginPath();c.moveTo(0,mid);c.lineTo(w,mid);c.stroke();
+    const off=MINUTES-bs.length;
+    deltas.forEach((d,i)=>{const x=pad+(off+i)*bw,bh=d/mx*(h/2-10);c.fillStyle=d>=0?'rgba(38,166,154,.8)':'rgba(239,83,80,.8)';c.fillRect(x+1,d>=0?mid-bh:mid,Math.max(1,bw-2),Math.abs(bh));});
+    c.strokeStyle='#f5c542';c.lineWidth=2;c.beginPath();
+    cvd.forEach((v,i)=>{const x=pad+(off+i)*bw+bw/2,y=8+(1-(v-cmn)/cr)*(h-16);i?c.lineTo(x,y):c.moveTo(x,y);});c.stroke();
+    c.fillStyle='#787b86';c.font='10px sans-serif';c.fillText('max |Δ| '+money(mx),6,12);c.fillStyle='#f5c542';c.fillText('CVD',w-30,12);
+  }
+
+  /* ---------- controls ---------- */
+  card.querySelectorAll('.ofbar .tab').forEach(t=>t.addEventListener('click',()=>{
+    card.querySelectorAll('.ofbar .tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+    cur=t.dataset.s;$('#of-whale').value=SYMS[cur].whale;dirty=dirtyTape=true;render();}));
+  $('#of-whale').value=SYMS[cur].whale;
+  $('#of-whale').addEventListener('change',e=>{const v=Math.max(1000,Number(e.target.value)||SYMS[cur].whale);SYMS[cur].whale=v;e.target.value=v;});
+  window.addEventListener('resize',()=>{dirty=true;});
+
+  Object.keys(SYMS).forEach(bootstrap);
+  setInterval(()=>Object.keys(SYMS).forEach(bootstrap),5*60000); // re-sync history every 5 min
+  connectBinance();
+  setInterval(render,500);
+})();
+</script>
+<!-- =================== END ORDER FLOW MODULE =================== -->
 </body>
 </html>
