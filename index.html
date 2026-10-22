@@ -503,5 +503,166 @@ poll();
 })();
 </script>
 <!-- =================== END ORDER FLOW MODULE =================== -->
+<!-- ============ SWING TRADING CONFIRMATION CHECKLIST (BTC) - paste just above </body> ============ -->
+<style>
+#sw-card .bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line)}
+#sw-card .verdict{padding:10px 14px;font-size:15px;font-weight:800;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#sw-card table{width:100%;border-collapse:collapse;font-size:12.5px}
+#sw-card th,#sw-card td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+#sw-card th{color:var(--mut);font-size:11px;text-transform:uppercase;font-weight:700}
+#sw-card td.cat{font-weight:800;white-space:nowrap}
+#sw-card td.on{background:rgba(38,166,154,.14);color:#7fe0d6;font-weight:700}
+#sw-card td.off{background:rgba(239,83,80,.14);color:#ff9e9b;font-weight:700}
+#sw-card .live{font-size:12px}
+#sw-card .st{display:inline-block;min-width:92px;text-align:center;padding:3px 8px;border-radius:10px;font-weight:800;font-size:11px}
+#sw-card .st.b{background:#123b33;color:var(--up)}#sw-card .st.s{background:#45191a;color:var(--dn)}#sw-card .st.n{background:#2a2e39;color:#c9c9c9}
+#sw-card .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 14px}
+@media(max-width:900px){#sw-card .charts{grid-template-columns:1fr}#sw-card .hide-sm{display:none}}
+#sw-card canvas{width:100%;height:170px;background:var(--panel2);border-radius:8px;display:block}
+#sw-card .tw{overflow-x:auto}
+</style>
+<script>
+(function(){
+  /* ---------- thresholds (edit to taste) ---------- */
+  const CFG={
+    symbol:'BTCUSDT',
+    fundBullLo:0.005, fundBullHi:0.01,   // % per 8h : bullish band from your checklist
+    fundBear:0.05,                       // % per 8h : bearish above this
+    oiExplode24h:12,                     // OI +% in 24h counted as "exploding"
+    oiExplodeRatio:4,                    // or OI% > 4x price% in the window
+    spotFlat:0.02                        // |spot delta / spot volume| below this = "flatlining"
+  };
+  const SPOT=['https://api.binance.com','https://data-api.binance.vision'];
+  const FUT='https://fapi.binance.com';
+  const WIN={'24h':6,'3d':18,'7d':42};   // number of 4h bars
+  let win='3d',DATA=null;
+
+  const card=document.createElement('div');card.className='card';card.id='sw-card';
+  card.innerHTML=`<h3>🧭 Direct Confirmation Checklist for Swing Trading · BTC <span class="mut" id="sw-upd" style="font-weight:400;margin-left:auto">loading…</span></h3>
+   <div class="bar"><span class="mut" style="font-size:12px">Lookback:</span>
+     <span class="tab" data-w="24h">24h</span><span class="tab on" data-w="3d">3 days</span><span class="tab" data-w="7d">7 days</span>
+     <span class="mut" style="margin-left:auto;font-size:11px">Binance spot + USDT-M perpetual · 4h data · refresh 5 min</span></div>
+   <div class="verdict" id="sw-verdict"></div>
+   <div class="tw"><table><thead><tr><th>Category</th><th>Bullish Confirmation Sign</th><th>Bearish Warning Sign</th><th class="hide-sm">Live reading</th><th>Status</th></tr></thead><tbody id="sw-body"></tbody></table></div>
+   <div class="charts">
+     <div><div class="mut" style="font-size:11px;margin-bottom:4px">Price (white) vs Open Interest (blue)</div><canvas id="sw-c1"></canvas></div>
+     <div><div class="mut" style="font-size:11px;margin-bottom:4px">Spot CVD (green) vs Futures CVD (orange)</div><canvas id="sw-c2"></canvas></div>
+   </div>`;
+  const anchor=document.getElementById('of-card')||document.querySelector('main .grid-main');
+  anchor?anchor.parentNode.insertBefore(card,anchor):document.querySelector('main').appendChild(card);
+  const q=s=>card.querySelector(s);
+  const pct=(a,b)=>b?(a-b)/Math.abs(b)*100:0;
+  const f2=v=>(v>0?'+':'')+v.toFixed(2);
+  const money=v=>{const a=Math.abs(v),s=v<0?'−':'+';return a>=1e9?s+'$'+(a/1e9).toFixed(2)+'B':a>=1e6?s+'$'+(a/1e6).toFixed(1)+'M':s+'$'+(a/1e3).toFixed(0)+'K';};
+
+  async function j(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(r.status);return r.json();}
+  async function spotK(){for(const h of SPOT){try{return await j(`${h}/api/v3/klines?symbol=${CFG.symbol}&interval=4h&limit=43`);}catch(e){}}throw new Error('spot blocked');}
+
+  async function load(){
+    const s=CFG.symbol;
+    const r=await Promise.allSettled([
+      spotK(),
+      j(`${FUT}/fapi/v1/klines?symbol=${s}&interval=4h&limit=43`),
+      j(`${FUT}/futures/data/openInterestHist?symbol=${s}&period=4h&limit=43`),
+      j(`${FUT}/fapi/v1/premiumIndex?symbol=${s}`),
+      j(`${FUT}/fapi/v1/fundingRate?symbol=${s}&limit=21`)
+    ]);
+    const v=i=>r[i].status==='fulfilled'?r[i].value:null;
+    DATA={spot:v(0),fut:v(1),oi:v(2),prem:v(3),fhist:v(4),t:Date.now()};
+    render();
+  }
+
+  // per-bar delta in USD: takerBuyQuote - takerSellQuote
+  const deltas=k=>k.map(x=>2*(+x[10])-(+x[7]));
+  const cum=a=>{let s=0;return a.map(x=>s+=x);};
+
+  function evalOI(n){
+    const {fut,oi}=DATA;if(!fut||!oi||oi.length<n+1)return null;
+    const px=fut.map(x=>+x[4]),o=oi.map(x=>+x.sumOpenInterestValue);
+    const P=px.slice(-(n+1)),O=o.slice(-(n+1));
+    const dP=pct(P[P.length-1],P[0]),dO=pct(O[O.length-1],O[0]);
+    const o24=pct(o[o.length-1],o[o.length-7]);
+    let up=0;for(let i=1;i<O.length;i++)if(O[i]>O[i-1])up++;const steady=up/(O.length-1);
+    const explode=o24>CFG.oiExplode24h||(Math.abs(dP)>0.3&&dO>0&&dO/Math.abs(dP)>CFG.oiExplodeRatio);
+    let st='n',why='Mixed';
+    if(explode){st='s';why='OI exploding — leverage piling in';}
+    else if(dO<-1){st='s';why=dP>0?'Price up on falling OI — short-covering, weak rally':'OI falling — positions closing';}
+    else if(dP>0&&dO>0&&steady>=0.55){st='b';why='OI rising steadily with price';}
+    else if(dP<0&&dO>0){st='s';why='Price down, OI up — shorts building';}
+    return {st,why,read:`Price ${f2(dP)}% · OI ${f2(dO)}% · OI 24h ${f2(o24)}% · rising bars ${(steady*100).toFixed(0)}%`};
+  }
+  function evalFunding(){
+    const {prem,fhist}=DATA;if(!prem)return null;
+    const now=+prem.lastFundingRate*100;
+    const avg=fhist&&fhist.length?fhist.reduce((a,x)=>a+ +x.fundingRate,0)/fhist.length*100:null;
+    let st='n',why;
+    if(now>CFG.fundBear){st='s';why='Highly elevated — crowded longs';}
+    else if(now>=CFG.fundBullLo&&now<=CFG.fundBullHi){st='b';why='Low / neutral — healthy';}
+    else if(now>CFG.fundBullHi){why='Elevated — watch for overheating';}
+    else if(now<0){why='Negative — shorts paying (squeeze fuel)';}
+    else why='Below 0.005% — very low demand for leverage';
+    return {st,why,read:`Now ${now.toFixed(4)}% / 8h${avg!=null?` · 7d avg ${avg.toFixed(4)}%`:''}`};
+  }
+  function evalCVD(n){
+    const {spot,fut}=DATA;if(!spot||!fut)return null;
+    const S=spot.slice(-n),F=fut.slice(-n);
+    const sd=deltas(S).reduce((a,b)=>a+b,0),fd=deltas(F).reduce((a,b)=>a+b,0);
+    const sv=S.reduce((a,x)=>a+ +x[7],0),fv=F.reduce((a,x)=>a+ +x[7],0);
+    const sn=sv?sd/sv:0,fn=fv?fd/fv:0;
+    const dP=pct(+F[F.length-1][4],+F[0][1]);
+    let st='n',why='No clear leader';
+    if(sd>0&&sn>=fn&&sn>CFG.spotFlat){st='b';why='Spot CVD leading the push';}
+    else if(fd>0&&(Math.abs(sn)<CFG.spotFlat||sd<0)){st='s';why='Futures CVD leading, spot flat/negative';}
+    else if(sd<0&&fd<0){st='s';why='Both spot & futures selling';}
+    return {st,why,read:`Spot ${money(sd)} (${(sn*100).toFixed(1)}% of vol) · Futures ${money(fd)} (${(fn*100).toFixed(1)}%) · Price ${f2(dP)}%`};
+  }
+
+  function row(cat,bull,bear,res){
+    const lbl={b:'✔ BULLISH',s:'✖ BEARISH',n:'● NEUTRAL'};
+    if(!res)return `<tr><td class="cat">${cat}</td><td>${bull}</td><td>${bear}</td><td class="hide-sm mut">Data unavailable on this network</td><td><span class="st n">N/A</span></td></tr>`;
+    return `<tr><td class="cat">${cat}</td><td class="${res.st==='b'?'on':''}">${bull}</td><td class="${res.st==='s'?'off':''}">${bear}</td>
+      <td class="hide-sm live">${res.read}<br><span class="mut">${res.why}</span></td><td><span class="st ${res.st}">${lbl[res.st]}</span></td></tr>`;
+  }
+  function render(){
+    if(!DATA)return;const n=WIN[win];
+    const oi=evalOI(n),fu=evalFunding(),cv=evalCVD(n);
+    q('#sw-body').innerHTML=
+      row('Open Interest','Rising steadily with price','Falling or exploding unsustainably',oi)+
+      row('Funding Rates',`Low / Neutral (${CFG.fundBullLo}% to ${CFG.fundBullHi}%)`,`Highly elevated (&gt; ${CFG.fundBear}% per 8h)`,fu)+
+      row('Spot Market','Spot CVD leading the upward push','Futures CVD leading while Spot flatlines',cv);
+    const rs=[oi,fu,cv].filter(Boolean),b=rs.filter(x=>x.st==='b').length,s=rs.filter(x=>x.st==='s').length;
+    let v,c;
+    if(!rs.length){v='Waiting for data…';c='n';}
+    else if(b===rs.length){v=`✅ ${b}/${rs.length} BULLISH — swing long confirmed`;c='b';}
+    else if(s>=2){v=`⛔ ${s}/${rs.length} BEARISH WARNINGS — avoid longs / tighten stops`;c='s';}
+    else if(b>=2&&s===0){v=`🟢 ${b}/${rs.length} bullish — leaning long, wait for the last confirmation`;c='b';}
+    else {v=`⚖ Mixed — ${b} bullish / ${s} bearish · no clean confirmation`;c='n';}
+    q('#sw-verdict').innerHTML=`<span class="st ${c}" style="font-size:13px;padding:5px 12px">${v}</span>`;
+    q('#sw-upd').textContent='Updated '+new Date(DATA.t).toLocaleTimeString();
+    charts(n);
+  }
+
+  function line(cv,series){
+    const dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w)return;
+    cv.width=w*dpr;cv.height=h*dpr;const x=cv.getContext('2d');x.scale(dpr,dpr);
+    series.forEach(({d,col})=>{if(!d||d.length<2)return;const mx=Math.max(...d),mn=Math.min(...d),r=mx-mn||1;
+      x.strokeStyle=col;x.lineWidth=2;x.beginPath();
+      d.forEach((v,i)=>{const px=6+i/(d.length-1)*(w-12),py=8+(1-(v-mn)/r)*(h-16);i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();});
+  }
+  function charts(n){
+    const {fut,oi,spot}=DATA;
+    line(q('#sw-c1'),[{d:fut&&fut.slice(-n).map(x=>+x[4]),col:'#d1d4dc'},{d:oi&&oi.slice(-n).map(x=>+x.sumOpenInterestValue),col:'#2962ff'}]);
+    line(q('#sw-c2'),[{d:spot&&cum(deltas(spot.slice(-n))),col:'#26a69a'},{d:fut&&cum(deltas(fut.slice(-n))),col:'#f7931a'}]);
+  }
+
+  card.querySelectorAll('.bar .tab').forEach(t=>t.addEventListener('click',()=>{
+    card.querySelectorAll('.bar .tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');win=t.dataset.w;render();}));
+  window.addEventListener('resize',()=>{if(DATA)charts(WIN[win]);});
+  load().catch(()=>{q('#sw-upd').textContent='Binance blocked on this network';});
+  setInterval(()=>load().catch(()=>{}),5*60000);
+})();
+</script>
+<!-- ============ END SWING CHECKLIST ============ -->
+
 </body>
 </html>
