@@ -663,6 +663,184 @@ poll();
 })();
 </script>
 <!-- ============ END SWING CHECKLIST ============ -->
+<!-- ============ BTC LIQUIDATIONS + LIQUIDATION-MAGNET ALERT - paste just above </body> ============ -->
+<style>
+#lq-card .st{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:6px;padding:10px 14px}
+#lq-card .st div{background:var(--panel2);border-radius:6px;padding:6px 8px}
+#lq-card .st small{display:block;color:var(--mut);font-size:10px;text-transform:uppercase}
+#lq-card .st b{font-size:14px}
+#lq-card .g{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;padding:0 14px 12px}
+@media(max-width:900px){#lq-card .g{grid-template-columns:1fr}}
+#lq-card .box{max-height:330px;overflow:auto;font-size:12px;background:var(--panel2);border-radius:8px}
+#lq-card .tp div{display:grid;grid-template-columns:64px 52px 1fr auto;gap:6px;padding:3px 8px;border-bottom:1px solid var(--line)}
+#lq-card .zn div{display:grid;grid-template-columns:110px 1fr 64px;gap:8px;padding:3px 8px;align-items:center}
+#lq-card .zn .bar{height:10px;border-radius:5px}
+#lq-card .zn .now{background:var(--blue,#2962ff);color:#fff;font-weight:800;border-radius:4px}
+#lq-card .zn .hot{font-weight:800;outline:1px solid #ff9800;border-radius:4px}
+#lq-card .alert{margin:0 14px 10px;padding:8px 12px;border-radius:8px;font-weight:800;display:none}
+#lq-card .ctl{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px}
+#lq-card input{width:80px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:3px 6px}
+#lq-card .big{animation:lqf 1.5s ease-out 2}
+@keyframes lqf{0%{background:#ff980055}100%{background:transparent}}
+</style>
+<script>
+(function(){
+  /* ---------------- settings (editable in the panel too) ---------------- */
+  const CFG={
+    whaleUsd:100000,        // tape: show liquidations >= this
+    cascadeUsd:5000000,     // alert: total liquidations in 60 s >= this
+    magnetPct:0.5,          // alert: price within this % of a strong liquidation zone
+    zoneTopN:6,             // strongest N zones each side
+    lev:[[10,.30],[25,.30],[50,.25],[100,.15]],  // assumed leverage mix (lev, weight)
+    binPct:0.25             // heat-zone bucket size (% of price)
+  };
+  const ls=k=>{try{return localStorage.getItem(k);}catch(e){return null;}};
+  const saved=JSON.parse(ls('mp_lq_cfg')||'{}');Object.assign(CFG,saved);
+  const save=()=>{try{localStorage.setItem('mp_lq_cfg',JSON.stringify({whaleUsd:CFG.whaleUsd,cascadeUsd:CFG.cascadeUsd,magnetPct:CFG.magnetPct}));}catch(e){}};
+
+  /* ---------------- card ---------------- */
+  const card=document.createElement('div');card.className='card';card.id='lq-card';
+  card.innerHTML=`<h3>💥 BTC Liquidations & Liquidation Magnets <span class="mut" id="lq-src" style="font-weight:400;margin-left:auto">connecting…</span></h3>
+   <div class="ctl"><span class="mut">Tape ≥ $</span><input id="lq-w" type="number" min="1000" step="10000">
+     <span class="mut">Cascade alert ≥ $ / 60s</span><input id="lq-c" type="number" min="100000" step="500000">
+     <span class="mut">Magnet within %</span><input id="lq-m" type="number" min="0.05" max="5" step="0.05">
+     <span class="mut" style="margin-left:auto">Alerts use the dashboard 🔔 Sound / 🖥 Alerts buttons</span></div>
+   <div class="alert" id="lq-alert"></div>
+   <div class="st" id="lq-stats"></div>
+   <div class="g">
+     <div><div class="mut" style="font-size:11px;margin-bottom:4px">⚡ Live liquidations · Binance · Bybit · OKX (LONG liq = forced sell, SHORT liq = forced buy)</div><div class="box tp" id="lq-tape"><div class="mut">Waiting for liquidations…</div></div></div>
+     <div><div class="mut" style="font-size:11px;margin-bottom:4px">🧲 Estimated liquidation zones (7d OI build-up × 10–100x leverage) — red = long liqs below, green = short liqs above</div><div class="box zn" id="lq-zones"><div class="mut">Building zones…</div></div></div>
+   </div>`;
+  const anchor=document.getElementById('sw-card')||document.getElementById('of-card')||document.querySelector('main .grid-main');
+  anchor?anchor.parentNode.insertBefore(card,anchor):document.querySelector('main').appendChild(card);
+  const q=s=>card.querySelector(s);
+  const money=v=>{const a=Math.abs(v);return a>=1e9?'$'+(a/1e9).toFixed(2)+'B':a>=1e6?'$'+(a/1e6).toFixed(2)+'M':a>=1e3?'$'+(a/1e3).toFixed(1)+'K':'$'+a.toFixed(0);};
+  const fp=v=>v.toLocaleString('en-US',{maximumFractionDigits:0});
+
+  /* ---------------- state ---------------- */
+  const EV=[];             // {ts,ex,long(bool),usd,price}
+  const STAT={Binance:'…',Bybit:'…',OKX:'…'};
+  let price=null,zones={above:[],below:[]},dirty=true,newIds=0;
+  const alerted={};
+
+  function addLiq(ex,isLong,usd,px,ts){
+    if(!(usd>0)||!(px>0))return;
+    EV.push({ts:ts||Date.now(),ex,long:isLong,usd,price:px,id:++newIds});
+    const cut=Date.now()-3600e3;while(EV.length&&EV[0].ts<cut)EV.shift();
+    dirty=true;
+  }
+
+  /* ---------------- alerts (reuse dashboard toggles) ---------------- */
+  function beep(f){try{const a=new (window.AudioContext||window.webkitAudioContext)(),o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);o.frequency.value=f||660;g.gain.value=.08;o.start();o.stop(a.currentTime+.25);}catch(e){}}
+  function alertUser(key,msg,color,cool){
+    const now=Date.now();if(alerted[key]&&now-alerted[key]<(cool||600e3))return;alerted[key]=now;
+    const el=q('#lq-alert');el.style.display='block';el.style.background=color==='up'?'#123b33':'#45191a';el.style.color=color==='up'?'#4cffd5':'#ff8a80';
+    el.textContent=new Date().toLocaleTimeString()+' · '+msg;
+    if(ls('mp_sound')==='1')beep(color==='up'?880:440);
+    if(ls('mp_notify')==='1'&&'Notification'in window&&Notification.permission==='granted')new Notification('💥 BTC liquidation alert',{body:msg});
+  }
+
+  /* ---------------- websockets ---------------- */
+  function ws(name,url,onopen,onmsg,ping){
+    let retry=0;
+    (function go(){
+      let s;try{s=new WebSocket(url);}catch(e){STAT[name]='blocked';dirty=true;return;}
+      let t=null;
+      s.onopen=()=>{retry=0;STAT[name]='live';dirty=true;onopen&&onopen(s);if(ping)t=setInterval(()=>{try{s.send(ping);}catch(e){}},20000);};
+      s.onmessage=e=>{if(e.data==='pong')return;let m;try{m=JSON.parse(e.data);}catch(x){return;}onmsg(m);};
+      s.onclose=()=>{clearInterval(t);STAT[name]=retry>3?'blocked?':'reconnecting';dirty=true;setTimeout(go,Math.min(60000,2000*2**retry++));};
+      s.onerror=()=>{};
+    })();
+  }
+  // Binance USDT-M: S=SELL -> long position liquidated
+  ws('Binance','wss://fstream.binance.com/ws/btcusdt@forceOrder',null,m=>{
+    const o=m.o;if(!o)return;const px=+o.ap||+o.p,qty=+o.z||+o.q;addLiq('BIN',o.S==='SELL',px*qty,px,o.T);});
+  // Bybit linear: S=Buy -> long position liquidated (Bybit uses position side)
+  ws('Bybit','wss://stream.bybit.com/v5/public/linear',s=>s.send(JSON.stringify({op:'subscribe',args:['allLiquidation.BTCUSDT']})),m=>{
+    (m.data||[]).forEach(d=>{const px=+d.p;addLiq('BYB',d.S==='Buy',px*(+d.v),px,+d.T);});},JSON.stringify({op:'ping'}));
+  // OKX swaps: side=sell -> long liquidated. USDT swap ctVal 0.01 BTC, USD swap ctVal $100
+  ws('OKX','wss://ws.okx.com:8443/ws/v5/public',s=>s.send(JSON.stringify({op:'subscribe',args:[{channel:'liquidation-orders',instType:'SWAP'}]})),m=>{
+    (m.data||[]).forEach(d=>{if(d.instId!=='BTC-USDT-SWAP'&&d.instId!=='BTC-USD-SWAP')return;
+      (d.details||[]).forEach(x=>{const px=+x.bkPx,sz=+x.sz;const usd=d.instId==='BTC-USD-SWAP'?sz*100:sz*0.01*px;addLiq('OKX',x.side==='sell',usd,px,+x.ts);});});},'ping');
+  // live price
+  ws('Price','wss://fstream.binance.com/ws/btcusdt@markPrice@1s',null,m=>{if(m.p){price=+m.p;dirty=true;}});
+
+  /* ---------------- estimated liquidation zones ---------------- */
+  async function getJ(u){const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw 0;return r.json();}
+  async function buildZones(){
+    try{
+      const [k,oi]=await Promise.all([
+        getJ('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1h&limit=168'),
+        getJ('https://fapi.binance.com/futures/data/openInterestHist?symbol=BTCUSDT&period=1h&limit=168')]);
+      const oiMap=new Map(oi.map(x=>[+x.timestamp,+x.sumOpenInterestValue]));
+      const bars=k.map(x=>({t:+x[0],h:+x[2],l:+x[3],c:+x[4],close:+x[6]}));
+      const last=bars[bars.length-1].c;price=price||last;
+      const bin=last*CFG.binPct/100,heat={};
+      let prevOI=null;
+      bars.forEach((b,i)=>{
+        const o=oiMap.get(b.t)??oiMap.get(b.t+3600e3);if(o==null)return;
+        if(prevOI!=null&&o>prevOI){
+          const add=o-prevOI;        // new $ positions, assume half long / half short at bar close
+          const later=bars.slice(i+1),hiAfter=Math.max(-Infinity,...later.map(x=>x.h)),loAfter=Math.min(Infinity,...later.map(x=>x.l));
+          CFG.lev.forEach(([L,w])=>{
+            const lp=b.c*(1-1/L+0.004),sp=b.c*(1+1/L-0.004);
+            if(!(loAfter<=lp)){const key=Math.round(lp/bin);heat[key]=(heat[key]||0)+add*.5*w;}   // longs not yet wiped
+            if(!(hiAfter>=sp)){const key=Math.round(sp/bin);heat[key]=(heat[key]||0)-add*.5*w;}   // shorts (negative key sign)
+          });
+        }
+        prevOI=o;
+      });
+      const all=Object.entries(heat).map(([k,v])=>({p:+k*bin,usd:Math.abs(v),side:v>0?'L':'S'}));
+      zones.below=all.filter(z=>z.side==='L'&&z.p<last).sort((a,b)=>b.usd-a.usd).slice(0,CFG.zoneTopN).sort((a,b)=>b.p-a.p);
+      zones.above=all.filter(z=>z.side==='S'&&z.p>last).sort((a,b)=>b.usd-a.usd).slice(0,CFG.zoneTopN).sort((a,b)=>b.p-a.p);
+      zones.t=Date.now();dirty=true;
+    }catch(e){zones.err=true;dirty=true;}
+  }
+
+  /* ---------------- render ---------------- */
+  const sum=(ms,f)=>{const c=Date.now()-ms;return EV.filter(e=>e.ts>=c&&f(e)).reduce((a,e)=>a+e.usd,0);};
+  function render(){
+    if(!dirty)return;dirty=false;
+    q('#lq-src').textContent=['Binance','Bybit','OKX'].map(n=>`${n} ${STAT[n]==='live'?'🟢':STAT[n]==='…'?'⚪':'🔴'}`).join(' · ');
+    const l5=sum(300e3,e=>e.long),s5=sum(300e3,e=>!e.long),l1=sum(3600e3,e=>e.long),s1=sum(3600e3,e=>!e.long),m1=sum(60e3,()=>true);
+    const big=EV.filter(e=>e.ts>=Date.now()-3600e3).reduce((m,e)=>!m||e.usd>m.usd?e:m,null);
+    const tot1=l1+s1,lp=tot1?l1/tot1*100:50;
+    q('#lq-stats').innerHTML=`
+      <div><small>BTC mark</small><b>${price?fp(price):'—'}</b></div>
+      <div><small>Longs liq 5m</small><b class="dn">${money(l5)}</b></div>
+      <div><small>Shorts liq 5m</small><b class="up">${money(s5)}</b></div>
+      <div><small>Longs liq 1h</small><b class="dn">${money(l1)}</b></div>
+      <div><small>Shorts liq 1h</small><b class="up">${money(s1)}</b></div>
+      <div><small>Long share 1h</small><b class="${lp>65?'dn':lp<35?'up':''}">${lp.toFixed(0)}%</b><br><span class="mut" style="font-size:11px">${lp>65?'Longs flushed':lp<35?'Shorts squeezed':'Balanced'}</span></div>
+      <div><small>Last 60 s</small><b class="${m1>=CFG.cascadeUsd?'dn':''}">${money(m1)}</b></div>
+      <div><small>Largest 1h</small><b class="${big&&big.long?'dn':'up'}">${big?money(big.usd):'—'}</b><br><span class="mut" style="font-size:11px">${big?(big.long?'LONG':'SHORT')+' @ '+fp(big.price)+' · '+big.ex:''}</span></div>`;
+    // cascade alert
+    if(m1>=CFG.cascadeUsd){const lm=sum(60e3,e=>e.long);const longSide=lm>=m1/2;
+      alertUser('cascade',`Liquidation cascade: ${money(m1)} in 60s — mostly ${longSide?'LONGS (forced selling)':'SHORTS (short squeeze)'}`,longSide?'dn':'up',120e3);}
+    // tape
+    const tape=EV.filter(e=>e.usd>=CFG.whaleUsd).slice(-60).reverse();
+    q('#lq-tape').innerHTML=tape.length?tape.map(e=>`<div class="${Date.now()-e.ts<4000&&e.usd>=CFG.whaleUsd*5?'big':''}"><span class="mut">${new Date(e.ts).toLocaleTimeString('en-GB')}</span><span class="mut">${e.ex}</span><span class="${e.long?'dn':'up'}">${e.long?'▼ LONG liq':'▲ SHORT liq'} @ ${fp(e.price)}</span><b class="${e.long?'dn':'up'}">${money(e.usd)}</b></div>`).join(''):'<div class="mut" style="padding:8px">Waiting for liquidations ≥ '+money(CFG.whaleUsd)+'…</div>';
+    // zones + magnet
+    if(zones.err&&!zones.t){q('#lq-zones').innerHTML='<div class="mut">Zone data blocked on this network</div>';return;}
+    if(!zones.t)return;
+    const mx=Math.max(1,...zones.above.concat(zones.below).map(z=>z.usd));
+    const rowZ=z=>{const d=price?(z.p-price)/price*100:0,hot=price&&Math.abs(d)<=CFG.magnetPct;
+      if(hot&&z.usd>=mx*0.35)alertUser('mag'+Math.round(z.p),`Price ${fp(price)} is ${Math.abs(d).toFixed(2)}% from a ${z.side==='L'?'LONG':'SHORT'}-liquidation zone at ${fp(z.p)} (~${money(z.usd)}) — magnet / stop-run risk`,z.side==='L'?'dn':'up',3600e3);
+      return `<div class="${hot?'hot':''}"><span>${fp(z.p)} <span class="mut">(${d>0?'+':''}${d.toFixed(2)}%)</span></span><span><i class="bar" style="display:block;width:${Math.max(3,z.usd/mx*100)}%;background:${z.side==='L'?'rgba(239,83,80,.8)':'rgba(38,166,154,.8)'}"></i></span><b style="text-align:right">${money(z.usd)}</b></div>`;};
+    q('#lq-zones').innerHTML=zones.above.map(rowZ).join('')+`<div class="now"><span>▶ ${price?fp(price):'—'}</span><span>current price</span><span></span></div>`+zones.below.map(rowZ).join('')+
+      `<div class="mut" style="display:block;font-size:10px;padding:6px 8px">Estimate only — exchanges don't publish liquidation levels. Updated ${new Date(zones.t).toLocaleTimeString()}, refresh 10 min.</div>`;
+  }
+
+  /* ---------------- controls ---------------- */
+  [['#lq-w','whaleUsd',1000],['#lq-c','cascadeUsd',100000],['#lq-m','magnetPct',0.05]].forEach(([id,k,min])=>{
+    const el=q(id);el.value=CFG[k];
+    el.addEventListener('change',()=>{let v=parseFloat(el.value);if(!isFinite(v)||v<min)v=min;CFG[k]=v;el.value=v;save();dirty=true;});});
+
+  buildZones();setInterval(buildZones,600e3);
+  setInterval(render,500);setInterval(()=>{dirty=true;},5000);
+})();
+</script>
+<!-- ============ END LIQUIDATIONS ============ -->
 
 </body>
 </html>
