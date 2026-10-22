@@ -557,18 +557,52 @@ poll();
 
   async function j(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(r.status);return r.json();}
   async function spotK(){for(const h of SPOT){try{return await j(`${h}/api/v3/klines?symbol=${CFG.symbol}&interval=4h&limit=43`);}catch(e){}}throw new Error('spot blocked');}
+  async function first(list){for(const [name,fn] of list){try{const v=await fn();if(v&&(!Array.isArray(v)||v.length))return {v,name};}catch(e){}}return {v:null,name:'blocked'};}
+  const B4=t=>Math.floor(t/14400000)*14400000;
+
+  /* --- futures 4h klines, normalised to Binance layout [t,o,h,l,c,v,ct,quoteVol,n,tbBase,tbQuote] --- */
+  const futBinance=()=>j(`${FUT}/fapi/v1/klines?symbol=${CFG.symbol}&interval=4h&limit=43`);
+  async function futOKX(){
+    const c=(await j('https://www.okx.com/api/v5/market/candles?instId=BTC-USDT-SWAP&bar=4H&limit=43')).data.slice().reverse();
+    let tk={};try{(await j('https://www.okx.com/api/v5/rubik/stat/taker-volume?ccy=BTC&instType=CONTRACTS&period=1H')).data
+      .forEach(([t,sell,buy])=>{const b=B4(+t);tk[b]=tk[b]||[0,0];tk[b][0]+=+sell;tk[b][1]+=+buy;});}catch(e){}
+    return c.map(x=>{const t=+x[0],cl=+x[4],qv=+x[7]||(+x[6]*cl),k=tk[t];
+      const tot=k?(k[0]+k[1])*cl:qv,tb=k?k[1]*cl:qv/2;return [t,x[1],x[2],x[3],x[4],x[6],t+14399999,String(tot),0,0,String(tb)];});
+  }
+  async function futBybit(){   // Bybit has no taker split -> futures CVD flat, price still valid
+    const l=(await j('https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=240&limit=43')).result.list.slice().reverse();
+    return l.map(x=>[+x[0],x[1],x[2],x[3],x[4],x[5],+x[0]+14399999,x[6],0,0,String(+x[6]/2)]);
+  }
+  /* --- open interest history -> [{timestamp,sumOpenInterestValue}] --- */
+  const oiBinance=()=>j(`${FUT}/futures/data/openInterestHist?symbol=${CFG.symbol}&period=4h&limit=43`);
+  async function oiBybit(){
+    const [o,k]=await Promise.all([j('https://api.bybit.com/v5/market/open-interest?category=linear&symbol=BTCUSDT&intervalTime=4h&limit=43'),
+      j('https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=240&limit=43')]);
+    const px={};k.result.list.forEach(x=>px[+x[0]]=+x[4]);
+    return o.result.list.slice().reverse().map(x=>{const t=+x.timestamp;return {timestamp:t,sumOpenInterestValue:String(+x.openInterest*(px[B4(t)]||px[t]||0))};}).filter(x=>+x.sumOpenInterestValue>0);
+  }
+  async function oiOKX(){
+    const d=(await j('https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-volume?ccy=BTC&period=1H')).data.slice().reverse();
+    const m={};d.forEach(([t,oi])=>{m[B4(+t)]=+oi;});   // last value in each 4h bucket
+    return Object.keys(m).sort().slice(-43).map(t=>({timestamp:+t,sumOpenInterestValue:String(m[t])}));
+  }
+  /* --- funding: {now:%, hist:[%]} --- */
+  async function fundBinance(){const [p,h]=await Promise.all([j(`${FUT}/fapi/v1/premiumIndex?symbol=${CFG.symbol}`),j(`${FUT}/fapi/v1/fundingRate?symbol=${CFG.symbol}&limit=21`)]);
+    return {now:+p.lastFundingRate*100,hist:h.map(x=>+x.fundingRate*100)};}
+  async function fundBybit(){const [t,h]=await Promise.all([j('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT'),j('https://api.bybit.com/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=21')]);
+    return {now:+t.result.list[0].fundingRate*100,hist:h.result.list.map(x=>+x.fundingRate*100)};}
+  async function fundOKX(){const [t,h]=await Promise.all([j('https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USDT-SWAP'),j('https://www.okx.com/api/v5/public/funding-rate-history?instId=BTC-USDT-SWAP&limit=21')]);
+    return {now:+t.data[0].fundingRate*100,hist:h.data.map(x=>+x.fundingRate*100)};}
 
   async function load(){
-    const s=CFG.symbol;
-    const r=await Promise.allSettled([
-      spotK(),
-      j(`${FUT}/fapi/v1/klines?symbol=${s}&interval=4h&limit=43`),
-      j(`${FUT}/futures/data/openInterestHist?symbol=${s}&period=4h&limit=43`),
-      j(`${FUT}/fapi/v1/premiumIndex?symbol=${s}`),
-      j(`${FUT}/fapi/v1/fundingRate?symbol=${s}&limit=21`)
-    ]);
-    const v=i=>r[i].status==='fulfilled'?r[i].value:null;
-    DATA={spot:v(0),fut:v(1),oi:v(2),prem:v(3),fhist:v(4),t:Date.now()};
+    const [sp,fu,oi,fd]=await Promise.all([
+      first([['Binance',spotK]]),
+      first([['Binance',futBinance],['OKX',futOKX],['Bybit',futBybit]]),
+      first([['Binance',oiBinance],['Bybit',oiBybit],['OKX',oiOKX]]),
+      first([['Binance',fundBinance],['Bybit',fundBybit],['OKX',fundOKX]])]);
+    DATA={spot:sp.v,fut:fu.v,oi:oi.v,fund:fd.v,src:{spot:sp.name,fut:fu.name,oi:oi.name,fund:fd.name},t:Date.now()};
+    const tag=card.querySelector('.bar .mut[style*="margin-left"]');
+    if(tag)tag.textContent=`Spot: ${sp.name} · Futures: ${fu.name} · OI: ${oi.name} · Funding: ${fd.name} · 4h · refresh 5 min`;
     render();
   }
 
@@ -589,19 +623,18 @@ poll();
     else if(dO<-1){st='s';why=dP>0?'Price up on falling OI — short-covering, weak rally':'OI falling — positions closing';}
     else if(dP>0&&dO>0&&steady>=0.55){st='b';why='OI rising steadily with price';}
     else if(dP<0&&dO>0){st='s';why='Price down, OI up — shorts building';}
-    return {st,why,read:`Price ${f2(dP)}% · OI ${f2(dO)}% · OI 24h ${f2(o24)}% · rising bars ${(steady*100).toFixed(0)}%`};
+    return {st,why,read:`<span class="mut">(${DATA.src.oi})</span> Price ${f2(dP)}% · OI ${f2(dO)}% · OI 24h ${f2(o24)}% · rising bars ${(steady*100).toFixed(0)}%`};
   }
   function evalFunding(){
-    const {prem,fhist}=DATA;if(!prem)return null;
-    const now=+prem.lastFundingRate*100;
-    const avg=fhist&&fhist.length?fhist.reduce((a,x)=>a+ +x.fundingRate,0)/fhist.length*100:null;
+    const F=DATA.fund;if(!F)return null;
+    const now=F.now,avg=F.hist&&F.hist.length?F.hist.reduce((a,b)=>a+b,0)/F.hist.length:null;
     let st='n',why;
     if(now>CFG.fundBear){st='s';why='Highly elevated — crowded longs';}
     else if(now>=CFG.fundBullLo&&now<=CFG.fundBullHi){st='b';why='Low / neutral — healthy';}
     else if(now>CFG.fundBullHi){why='Elevated — watch for overheating';}
     else if(now<0){why='Negative — shorts paying (squeeze fuel)';}
     else why='Below 0.005% — very low demand for leverage';
-    return {st,why,read:`Now ${now.toFixed(4)}% / 8h${avg!=null?` · 7d avg ${avg.toFixed(4)}%`:''}`};
+    return {st,why,read:`Now ${now.toFixed(4)}% / 8h${avg!=null?` · 7d avg ${avg.toFixed(4)}%`:''} <span class="mut">(${DATA.src.fund})</span>`};
   }
   function evalCVD(n){
     const {spot,fut}=DATA;if(!spot||!fut)return null;
@@ -611,6 +644,7 @@ poll();
     const sn=sv?sd/sv:0,fn=fv?fd/fv:0;
     const dP=pct(+F[F.length-1][4],+F[0][1]);
     let st='n',why='No clear leader';
+    if(DATA.src.fut==='Bybit')return {st:'n',why:'Futures taker data unavailable on this network',read:`Spot ${money(sd)} (${(sn*100).toFixed(1)}% of vol) · Price ${f2(dP)}%`};
     if(sd>0&&sn>=fn&&sn>CFG.spotFlat){st='b';why='Spot CVD leading the push';}
     else if(fd>0&&(Math.abs(sn)<CFG.spotFlat||sd<0)){st='s';why='Futures CVD leading, spot flat/negative';}
     else if(sd<0&&fd<0){st='s';why='Both spot & futures selling';}
@@ -663,6 +697,7 @@ poll();
 })();
 </script>
 <!-- ============ END SWING CHECKLIST ============ -->
+
 <!-- ============ BTC LIQUIDATIONS + LIQUIDATION-MAGNET ALERT - paste just above </body> ============ -->
 <style>
 #lq-card .st{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:6px;padding:10px 14px}
